@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: research_factory
+      POSTGRES_USER: research
+      POSTGRES_PASSWORD: research
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U research -d research_factory"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://research:research@postgres:5432/research_factory
+      ARTIFACT_ROOT: /app/data
+      QUESTION_LIBRARY: /app/config/question_templates.yaml
+    ports:
+      - "8000:8000"
+    volumes:
+      - research_data:/app/data
+      - ./config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "alembic upgrade head && uvicorn research_factory.api.app:create_app --factory --host 0.0.0.0 --port 8000"]
+    restart: unless-stopped
+
+  worker:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://research:research@postgres:5432/research_factory
+      ARTIFACT_ROOT: /app/data
+      QUESTION_LIBRARY: /app/config/question_templates.yaml
+    volumes:
+      - research_data:/app/data
+      - ./config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+    command: ["python", "-m", "research_factory.worker"]
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  research_data:

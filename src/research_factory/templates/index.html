@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Nowy projekt · Research Factory{% endblock %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">SYSTEM BADAWCZO-ANALITYCZNY</p>
+  <h1>Od pomysłu do porównania modeli, architektury i backlogu</h1>
+  <p>Każde pytanie jest wykonywane niezależnie, a stan zadań pozostaje w PostgreSQL i może być wznowiony po restarcie.</p>
+</section>
+
+<div class="grid two">
+  <section class="card">
+    <h2>Utwórz projekt</h2>
+    {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+    <form method="post" action="/projects">
+      <label>Nazwa projektu
+        <input name="name" required minlength="2" maxlength="200" value="{{ form.name if form else '' }}" placeholder="np. Asystent analizy umów">
+      </label>
+      <label>Opis jednego pomysłu
+        <textarea name="idea" required minlength="20" maxlength="20000" rows="10" placeholder="Opisz cel, użytkowników, dane, oczekiwany wynik i ograniczenia...">{{ form.idea if form else '' }}</textarea>
+      </label>
+      <label>Wejściowy research Google (opcjonalnie)
+        <textarea name="google_research_input" maxlength="200000" rows="6" placeholder="Wklej istniejące wyniki Google: tytuły, adresy URL i opisy. Pole nie zastępuje opisu pomysłu.">{{ form.google_research_input if form else '' }}</textarea>
+      </label>
+      <fieldset>
+        <legend>Modele</legend>
+        <label class="check"><input type="checkbox" name="models" value="openai" checked> OpenAI</label>
+        <label class="check"><input type="checkbox" name="models" value="gemini" checked> Gemini</label>
+        <label class="check"><input type="checkbox" name="models" value="deepseek" checked> DeepSeek</label>
+      </fieldset>
+      <fieldset>
+        <legend>Zakres researchu MVP</legend>
+        <label class="check"><input type="checkbox" name="scopes" value="github" checked> GitHub</label>
+        <label class="check"><input type="checkbox" name="scopes" value="web" checked> WWW</label>
+        <label class="check"><input type="checkbox" name="scopes" value="reddit"> Reddit</label>
+        <label class="check"><input type="checkbox" name="scopes" value="google"> Google</label>
+      </fieldset>
+      <button type="submit">Utwórz i uruchom kolejkę</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Ostatnie projekty</h2>
+    {% if projects %}
+      <div class="project-list">
+      {% for item in projects %}
+        <a class="project-row" href="/projects/{{ item.id }}/runs/{{ item.runs[-1].id if item.runs else '' }}">
+          <span><strong>{{ item.name }}</strong><small>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</small></span>
+          <span class="pill {{ item.status|lower }}">{{ item.status }}</span>
+        </a>
+      {% endfor %}
+      </div>
+    {% else %}<p class="muted">Brak projektów.</p>{% endif %}
+      <div class="scope-note">
+        <h3>Konfiguracja researchu</h3>
+        <p>Tokeny GitHub i Reddit oraz adapter istniejącego scrapera Google konfiguruje się w <code>.env</code>. Wartości sekretów nie są zapisywane w projekcie ani artefaktach.</p>
+      </div>
+  </section>
+</div>
+{% endblock %}

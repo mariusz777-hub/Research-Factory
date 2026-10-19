@@ -1,0 +1,104 @@
+version: 1
+language: pl
+system_prompt: |
+  Jesteś doświadczonym badaczem produktu, architektem oprogramowania i analitykiem.
+  Analizuj wyłącznie podany pomysł. Oddzielaj fakty, założenia i rekomendacje.
+  Nie wymyślaj źródeł ani wyników researchu. Jeśli czegoś nie da się ustalić,
+  nazwij brak wprost. Odpowiedź ma być konkretna, techniczna i użyteczna.
+questions:
+  - id: problem_value
+    category: product
+    enabled: true
+    template: |
+      Projekt: {{ project_name }}
+      Pomysł: {{ idea }}
+      Zdefiniuj problem, proponowaną wartość, grupy użytkowników, mierzalne rezultaty
+      oraz najważniejsze założenia wymagające walidacji.
+  - id: users_workflows
+    category: product
+    enabled: true
+    template: |
+      Projekt: {{ project_name }}
+      Pomysł: {{ idea }}
+      Opisz persony, główne scenariusze i przepływy użytkownika. Wskaż sytuacje brzegowe,
+      bariery adopcji i kryteria dobrego UX.
+  - id: market_alternatives
+    category: research
+    enabled: true
+    template: |
+      Projekt: {{ project_name }}
+      Pomysł: {{ idea }}
+      Jakie klasy istniejących rozwiązań, narzędzi open source i alternatyw należy zbadać?
+      Nie podawaj zmyślonych wyników. Zbuduj kryteria porównania i hipotezy do researchu.
+  - id: functional_scope
+    category: requirements
+    enabled: true
+    template: |
+      Projekt: {{ project_name }}
+      Pomysł: {{ idea }}
+      Zdefiniuj funkcje MVP, wymagania poza MVP, reguły biznesowe, wejścia, wyjścia
+      i kryteria akceptacji. Ogranicz zakres MVP do działającego produktu.
+  - id: nonfunctional_requirements
+    category: requirements
+    enabled: true
+    template: |
+      Projekt: {{ project_name }}
+      Pomysł: {{ idea }}
+      Określ wymagania niefunkcjonalne: dostępność, wydajność, skalowanie, niezawodność,
+      obserwowalność, utrzymanie, dostępność dla użytkowników i koszty.
+  - id: data_model
+    category: architecture
+    enabled: true
+    template: |
+      Projekt: {{ project_name }}
+      Pomysł: {{ idea }}
+      Zaproponuj model domenowy i dane operacyjne. Wskaż encje, relacje, cykl życia,
+      integralność, retencję, wersjonowanie i audyt.
+  - id: system_architecture
+    category: architecture
+    enabled: true
+    template: |
+      Projekt: {{ project_name }}
+      Pomysł: {{ idea }}
+      Zaproponuj architekturę logiczną i wdrożeniową, granice komponentów, API,
+      przepływ danych, kolejki, idempotencję, wznowienie po awarii i decyzje technologiczne.
+  - id: security_privacy
+    category: security
+    enabled: true
+    template: |
+      Projekt: {{ project_name }}
+      Pomysł: {{ idea }}
+      Przeprowadź threat modeling na poziomie MVP. Uwzględnij uwierzytelnianie,
+      autoryzację, sekrety, dane wrażliwe, nadużycia, zależności i wymagane zabezpieczenia.
+  - id: integrations_limits
+    category: architecture
+    enabled: true
+    template: |
+      Projekt: {{ project_name }}
+      Pomysł: {{ idea }}
+      Zidentyfikuj integracje, limity API, timeouty, retry, rate limiting, circuit breaker,
+      degradację funkcji i strategie testowania kontraktów.
+  - id: testing_quality
+    category: delivery
+    enabled: true
+    template: |
+      Projekt: {{ project_name }}
+      Pomysł: {{ idea }}
+      Zbuduj strategię jakości: testy jednostkowe, integracyjne, end-to-end, obciążeniowe,
+      bezpieczeństwa, kryteria release i dane testowe.
+  - id: delivery_backlog
+    category: delivery
+    enabled: true
+    template: |
+      Projekt: {{ project_name }}
+      Pomysł: {{ idea }}
+      Rozpisz realizację na epiki i pionowe przyrosty. Podaj zależności, ryzyka,
+      Definition of Done i kolejność dostarczania od szkieletu do produkcyjnego MVP.
+  - id: operations_economics
+    category: operations
+    enabled: true
+    template: |
+      Projekt: {{ project_name }}
+      Pomysł: {{ idea }}
+      Oceń model operacyjny, monitoring, SLO, obsługę incydentów, kopie zapasowe,
+      koszty głównych zasobów i elementy wymagające kontroli kosztowej.

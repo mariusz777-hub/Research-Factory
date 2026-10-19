@@ -1,0 +1,290 @@
+﻿from __future__ import annotations
+
+import re
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import uuid4
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
+
+from .artifacts import ArtifactStore, safe_name
+from .models import Event, Job, ModelResponse, Project, Question, Run
+from .question_library import QuestionLibrary
+from .schemas import ProjectCreate
+from .settings import Settings
+
+TERMINAL = {"SUCCESS", "FAILED"}
+
+
+def _slug(value: str) -> str:
+    base = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")[:80] or "projekt"
+    return f"{base}-{uuid4().hex[:6]}"
+
+
+class Orchestrator:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        settings: Settings,
+        artifacts: ArtifactStore,
+        library: QuestionLibrary,
+    ):
+        self.session_factory = session_factory
+        self.settings = settings
+        self.artifacts = artifacts
+        self.library = library
+
+    def _add_job(
+        self,
+        session: Session,
+        run_id: str,
+        job_type: str,
+        dedupe_key: str,
+        payload: dict,
+        priority: int,
+    ) -> Job:
+        existing = session.scalar(
+            select(Job).where(Job.run_id == run_id, Job.dedupe_key == dedupe_key)
+        )
+        if existing:
+            return existing
+        job = Job(
+            run_id=run_id,
+            job_type=job_type,
+            dedupe_key=dedupe_key,
+            payload=payload,
+            priority=priority,
+            max_attempts=self.settings.job_max_attempts,
+        )
+        session.add(job)
+        return job
+
+    def _event(self, session: Session, run_id: str, event_type: str, message: str, data: dict | None = None):
+        session.add(
+            Event(run_id=run_id, level="INFO", event_type=event_type, message=message, event_data=data or {})
+        )
+
+    def create_project(self, request: ProjectCreate) -> tuple[Project, Run]:
+        rendered = self.library.render(project_name=request.name, idea=request.idea)
+        slug = _slug(request.name)
+        with self.session_factory.begin() as session:
+            project = Project(
+                name=request.name.strip(),
+                slug=slug,
+                idea=request.idea.strip(),
+                google_research_input=request.google_research_input.strip(),
+                selected_models=request.models,
+                selected_scopes=request.scopes,
+                status="QUEUED",
+            )
+            run = Run(
+                project=project,
+                status="QUEUED",
+                question_library_version=self.library.version,
+                model_call_limit=self.settings.project_model_call_limit,
+                token_limit=self.settings.project_token_limit,
+            )
+            session.add_all([project, run])
+            session.flush()
+
+            base = self.artifacts.run_root(slug, run.id).relative_to(self.artifacts.root)
+            self.artifacts.write_text(base / "input" / "idea.md", request.idea.strip() + "\n")
+            if request.google_research_input.strip():
+                self.artifacts.write_text(
+                    base / "input" / "google_research.md",
+                    request.google_research_input.strip() + "\n",
+                )
+            self.artifacts.write_text(base / "prompts" / "system.md", self.library.system_prompt + "\n")
+            questions: list[Question] = []
+            for item in rendered:
+                question = Question(
+                    run_id=run.id,
+                    template_id=item.template_id,
+                    category=item.category,
+                    ordinal=item.ordinal,
+                    rendered_prompt=item.prompt,
+                    prompt_checksum=item.checksum,
+                )
+                session.add(question)
+                session.flush()
+                questions.append(question)
+                prompt_path = base / "prompts" / item.template_id / "prompt.md"
+                self.artifacts.write_text(prompt_path, item.prompt + "\n")
+                for model in request.models:
+                    self._add_job(
+                        session,
+                        run.id,
+                        "MODEL_ANSWER",
+                        f"model:{question.id}:{model}",
+                        {"question_id": question.id, "model": model},
+                        priority=10,
+                    )
+
+            query = " ".join(request.idea.split())
+            if "github" in request.scopes:
+                self._add_job(
+                    session,
+                    run.id,
+                    "GITHUB_RESEARCH",
+                    "research:github",
+                    {"query": query[:240]},
+                    priority=20,
+                )
+            if "web" in request.scopes:
+                self._add_job(
+                    session,
+                    run.id,
+                    "WEB_RESEARCH",
+                    "research:web",
+                    {"query": query[:500]},
+                    priority=20,
+                )
+            if "reddit" in request.scopes:
+                self._add_job(
+                    session,
+                    run.id,
+                    "REDDIT_RESEARCH",
+                    "research:reddit",
+                    {"query": query[:500]},
+                    priority=20,
+                )
+            if "google" in request.scopes:
+                self._add_job(
+                    session,
+                    run.id,
+                    "GOOGLE_RESEARCH",
+                    "research:google",
+                    {"query": query[:500]},
+                    priority=20,
+                )
+
+            manifest = {
+                "project_id": project.id,
+                "run_id": run.id,
+                "name": project.name,
+                "idea": project.idea,
+                "models": request.models,
+                "scopes": request.scopes,
+                "google_research_input_chars": len(request.google_research_input.strip()),
+                "question_library_version": self.library.version,
+                "question_count": len(questions),
+                "limits": {
+                    "model_calls": run.model_call_limit,
+                    "tokens": run.token_limit,
+                    "max_attempts": self.settings.job_max_attempts,
+                    "model_min_interval_seconds": self.settings.model_min_interval_seconds,
+                },
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+            self.artifacts.write_json(base / "manifest.json", manifest)
+            self._event(session, run.id, "RUN_CREATED", "Utworzono projekt i kolejkÄ™ poczÄ…tkowÄ…", manifest)
+            session.flush()
+            session.expunge(project)
+            if run in session:
+                session.expunge(run)
+            return project, run
+
+    def advance(self, run_id: str) -> None:
+        """Idempotentnie rozwija graf po kaĹĽdym terminalnym zadaniu i po restarcie."""
+        with self.session_factory.begin() as session:
+            run = session.get(Run, run_id)
+            if run is None:
+                raise KeyError(run_id)
+            project = session.get(Project, run.project_id)
+            questions = list(
+                session.scalars(select(Question).where(Question.run_id == run_id).order_by(Question.ordinal))
+            )
+            jobs = list(session.scalars(select(Job).where(Job.run_id == run_id)))
+            if run.started_at is None and any(job.status in {"RUNNING", "SUCCESS", "FAILED", "RETRY"} for job in jobs):
+                run.started_at = datetime.now(UTC)
+                run.status = "RUNNING"
+                project.status = "RUNNING"
+
+            by_key = {job.dedupe_key: job for job in jobs}
+            added = False
+            for question in questions:
+                model_jobs = [by_key.get(f"model:{question.id}:{model}") for model in project.selected_models]
+                if model_jobs and all(job and job.status in TERMINAL for job in model_jobs):
+                    key = f"compare:{question.id}"
+                    if key not in by_key:
+                        new_job = self._add_job(
+                            session,
+                            run_id,
+                            "COMPARE",
+                            key,
+                            {"question_id": question.id},
+                            priority=30,
+                        )
+                        by_key[key] = new_job
+                        added = True
+
+            compare_jobs = [by_key.get(f"compare:{question.id}") for question in questions]
+            research_jobs = [
+                job
+                for job in by_key.values()
+                if job.job_type
+                in {
+                    "GITHUB_RESEARCH",
+                    "REDDIT_RESEARCH",
+                    "GOOGLE_RESEARCH",
+                    "WEB_RESEARCH",
+                }
+            ]
+            compares_terminal = bool(compare_jobs) and all(job and job.status in TERMINAL for job in compare_jobs)
+            research_terminal = all(job.status in TERMINAL for job in research_jobs)
+            if compares_terminal and research_terminal and "synthesis:run" not in by_key:
+                successful_models = list(
+                    session.scalars(
+                        select(ModelResponse.model_name).where(ModelResponse.run_id == run_id)
+                    )
+                )
+                lead_model = max(
+                    project.selected_models,
+                    key=lambda model: successful_models.count(model),
+                )
+                self._add_job(
+                    session,
+                    run_id,
+                    "SYNTHESIS",
+                    "synthesis:run",
+                    {"lead_model": lead_model},
+                    priority=40,
+                )
+                added = True
+
+            synthesis = by_key.get("synthesis:run") or session.scalar(
+                select(Job).where(Job.run_id == run_id, Job.dedupe_key == "synthesis:run")
+            )
+            if synthesis and synthesis.status in TERMINAL and "report:run" not in by_key:
+                self._add_job(session, run_id, "REPORT", "report:run", {}, priority=50)
+                added = True
+
+            report = by_key.get("report:run") or session.scalar(
+                select(Job).where(Job.run_id == run_id, Job.dedupe_key == "report:run")
+            )
+            if report and report.status in TERMINAL:
+                final_jobs = list(session.scalars(select(Job).where(Job.run_id == run_id)))
+                has_failures = any(job.status == "FAILED" for job in final_jobs)
+                run.status = "PARTIAL" if has_failures else "COMPLETE"
+                run.completed_at = run.completed_at or datetime.now(UTC)
+                project.status = run.status
+                self._event(
+                    session,
+                    run_id,
+                    "RUN_FINISHED",
+                    f"Run zakoĹ„czony ze statusem {run.status}",
+                    {"failed_jobs": sum(job.status == "FAILED" for job in final_jobs)},
+                )
+            elif added:
+                self._event(session, run_id, "GRAPH_ADVANCED", "Dodano zadania kolejnego etapu")
+
+    def advance_active_runs(self) -> int:
+        with self.session_factory() as session:
+            run_ids = list(
+                session.scalars(select(Run.id).where(Run.status.in_(["QUEUED", "RUNNING"])))
+            )
+        for run_id in run_ids:
+            self.advance(run_id)
+        return len(run_ids)
+

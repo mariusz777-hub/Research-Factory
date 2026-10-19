@@ -1,0 +1,40 @@
+from pathlib import Path
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from research_factory.models import Base
+from research_factory.question_library import load_question_library
+from research_factory.settings import Settings
+
+
+@pytest.fixture
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def settings(tmp_path: Path, project_root: Path) -> Settings:
+    return Settings(
+        database_url=f"sqlite:///{tmp_path / 'test.db'}",
+        artifact_root=tmp_path / "artifacts",
+        question_library=project_root / "config" / "question_templates.yaml",
+        model_min_interval_seconds=0,
+        worker_poll_seconds=0.1,
+        retry_base_seconds=1,
+        retry_max_seconds=5,
+        job_max_attempts=2,
+    )
+
+
+@pytest.fixture
+def session_factory(settings: Settings):
+    engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+@pytest.fixture
+def library(settings: Settings):
+    return load_question_library(settings.question_library)

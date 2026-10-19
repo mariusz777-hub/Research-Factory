@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} · Research Factory{% endblock %}
+{% block content %}
+<section class="project-head">
+  <div>
+    <p class="eyebrow">PROJEKT</p>
+    <h1>{{ project.name }}</h1>
+    <p>{{ project.idea }}</p>
+  </div>
+  <div id="run-state" class="state-card">
+    <span class="muted">Run</span><code>{{ run.id }}</code>
+    <strong id="overall-status">{{ run.status }}</strong>
+  </div>
+</section>
+
+<section class="card progress-card">
+  <div class="progress-label"><span>Postęp zadań terminalnych</span><strong id="progress-value">0%</strong></div>
+  <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+</section>
+
+<div class="grid two status-grid">
+  <section class="card">
+    <h2>Etapy i statusy</h2>
+    <div id="stages" class="stages"><p class="muted">Ładowanie statusu…</p></div>
+  </section>
+  <section class="card">
+    <h2>Artefakty</h2>
+    <div id="artifacts"><p class="muted">Pliki pojawią się po zakończeniu etapów.</p></div>
+  </section>
+</div>
+<section class="card">
+  <h2>Dziennik zdarzeń</h2>
+  <div id="events" class="events"><p class="muted">Ładowanie…</p></div>
+</section>
+<script>window.RUN_ID = "{{ run.id }}";</script>
+<script src="{{ url_for('static', path='/status.js') }}"></script>
+{% endblock %}
